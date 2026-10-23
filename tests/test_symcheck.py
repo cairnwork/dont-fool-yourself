@@ -1,4 +1,4 @@
-import json, sys, tempfile, unittest
+import json, os, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import symcheck
@@ -143,6 +143,46 @@ class T(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             args = self.dirs(d, {"p.txt": "a", "i.bin": b"\xff"}, {"p.txt": "b", "i.bin": b"\xff"})
             self.assertEqual(symcheck.main(args), 1)
+
+    # Issue #1 second pass: links and special files are listed, never followed, never hang
+    def test_symlinks_are_incomplete(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.dirs(d, {"p.txt": "s", "real.txt": "x", "bin": b"\xff"},
+                             {"p.txt": "s", "real.txt": "x", "bin": b"\xff"})
+            for arm in ("A", "B"):
+                os.symlink("nowhere", f"{d}/{arm}/dangling")
+                os.symlink("loop2", f"{d}/{arm}/loop1")
+                os.symlink("loop1", f"{d}/{arm}/loop2")
+                os.symlink("bin", f"{d}/{arm}/to_binary")
+                os.symlink("real.txt", f"{d}/{arm}/to_real")
+                os.symlink(".", f"{d}/{arm}/self_dir")
+            self.assertEqual(symcheck.main(args), 3)
+
+    def test_symlink_target_difference_is_not_hidden(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.dirs(d, {"p.txt": "s", "t1": "a"}, {"p.txt": "s", "t1": "a"})
+            os.symlink("t1", f"{d}/A/link"); os.symlink("elsewhere", f"{d}/B/link")
+            self.assertEqual(symcheck.main(args), 3)
+
+    def test_fifo_is_incomplete_and_does_not_hang(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.dirs(d, {"p.txt": "s"}, {"p.txt": "s"})
+            os.mkfifo(f"{d}/A/pipe"); os.mkfifo(f"{d}/B/pipe")
+            self.assertEqual(symcheck.main(args), 3)
+
+    def test_single_file_args_symlink_or_fifo(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "f").write_text("x"); os.symlink("f", f"{d}/l"); os.mkfifo(f"{d}/q")
+            self.assertEqual(symcheck.main([f"{d}/l", f"{d}/f"]), 3)
+            self.assertEqual(symcheck.main([f"{d}/f", f"{d}/q"]), 3)
+            os.symlink("gone", f"{d}/dangle")
+            self.assertEqual(symcheck.main([f"{d}/dangle", f"{d}/f"]), 3)
+
+    def test_symlinked_directory_not_followed(self):
+        with tempfile.TemporaryDirectory() as d:
+            args = self.dirs(d, {"p.txt": "s"}, {"p.txt": "s"})
+            os.symlink(d, f"{d}/A/up"); os.symlink(d, f"{d}/B/up")
+            self.assertEqual(symcheck.main(args), 3)
 
     def test_missing_input(self):
         self.assertEqual(symcheck.main(["/nonexistent/a", "/nonexistent/b"]), 2)

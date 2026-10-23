@@ -8,9 +8,10 @@ Exit codes:
   0  every compared file pair matched, apart from registered differences
   1  unexpected differences (listed)
   2  usage or input error (bad regex, unpaired marker, missing path ...)
-  3  INCOMPLETE: something could not be compared (a skipped or undecodable
-     file, an unparsable or ambiguous JSON file, or zero file pairs). Listed.
-     Never treat 3 as success.
+  3  INCOMPLETE: something could not be compared: a symlink (even to a valid
+     file, dangling or looping) or a special file such as a FIFO, which are
+     never followed or opened; an undecodable file; an unparsable or
+     ambiguous JSON file; or zero file pairs. Listed. Never treat 3 as success.
 A 0 means "no unexpected difference within the checked scope", NOT "the arms
 are proven symmetric": anything outside the compared files is not looked at.
 
@@ -38,7 +39,9 @@ import argparse
 import difflib
 import fnmatch
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -135,28 +138,58 @@ def _skipped(rel, ignore):
                for g in ignore)
 
 
+def _kind(path):
+    """'file', 'symlink' or 'special' (FIFO, socket, device ...), without following links."""
+    mode = os.lstat(path).st_mode
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    return "file" if stat.S_ISREG(mode) else "special"
+
+
+def _scan(root, ignore):
+    """Walk root without following symlinks. Returns (regular files, other entries)."""
+    files, other = {}, {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        rel_dir = Path(dirpath).relative_to(root).as_posix()
+        dirnames[:] = sorted(dirnames)
+        entries = [(n, True) for n in dirnames] + [(n, False) for n in sorted(filenames)]
+        for name, is_dir_entry in entries:
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            full = os.path.join(dirpath, name)
+            if _skipped(rel, ignore):
+                continue
+            if is_dir_entry and not os.path.islink(full):
+                continue  # a real directory: os.walk descends into it
+            kind = _kind(full)
+            if kind == "file":
+                files[rel] = Path(full)
+            else:
+                other[rel] = kind
+    return files, other
+
+
 def _pairs(a, b, ignore=()):
+    """Return (pairs, missing, incomplete) without ever following a symlink."""
     pa, pb = Path(a), Path(b)
-    if not pa.exists() or not pb.exists():
+    if not os.path.lexists(pa) or not os.path.lexists(pb):
         raise ValueError("input path does not exist")
-    if pa.is_dir() != pb.is_dir():
+    da = pa.is_dir() and not pa.is_symlink()
+    db = pb.is_dir() and not pb.is_symlink()
+    if not da and not db:
+        bad = [f"{p} ({side}): {_kind(p)}, not compared"
+               for side, p in (("A", pa), ("B", pb)) if _kind(p) != "file"]
+        return ([] if bad else [(str(pa), pa, pb)]), [], bad
+    if da != db:
         raise ValueError("both inputs must be files or both directories")
-    if not pa.is_dir():
-        return [(str(pa), pa, pb)], []
-
-    def files(root):
-        out = {}
-        for p in root.rglob("*"):
-            rel = p.relative_to(root).as_posix()
-            if p.is_file() and not _skipped(rel, ignore):
-                out[rel] = p
-        return out
-
-    fa, fb = files(pa), files(pb)
+    fa, oa = _scan(pa, ignore)
+    fb, ob = _scan(pb, ignore)
+    incomplete = [f"{k} (A): {v}, not followed or compared" for k, v in sorted(oa.items())]
+    incomplete += [f"{k} (B): {v}, not followed or compared" for k, v in sorted(ob.items())]
+    handled = set(oa) | set(ob)
     pairs = [(k, fa[k], fb[k]) for k in sorted(fa.keys() & fb.keys())]
-    missing = [f"{k} (only in A)" for k in sorted(fa.keys() - fb.keys())]
-    missing += [f"{k} (only in B)" for k in sorted(fb.keys() - fa.keys())]
-    return pairs, missing
+    missing = [f"{k} (only in A)" for k in sorted(fa.keys() - fb.keys() - handled)]
+    missing += [f"{k} (only in B)" for k in sorted(fb.keys() - fa.keys() - handled)]
+    return pairs, missing, incomplete
 
 
 def main(argv=None):
@@ -172,7 +205,7 @@ def main(argv=None):
     try:
         for p in args.allow:
             re.compile(p)
-        pairs, missing = _pairs(args.a, args.b, args.ignore)
+        pairs, missing, incomplete = _pairs(args.a, args.b, args.ignore)
         total = compared = 0
         for name, pa, pb in pairs:
             try:
