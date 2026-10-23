@@ -1,4 +1,4 @@
-# honest-measurement-kit (working name)
+# dont-fool-yourself (working name)
 
 **English** | [中文](#中文)
 
