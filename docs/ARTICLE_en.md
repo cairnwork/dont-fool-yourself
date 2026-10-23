@@ -32,7 +32,7 @@ That is what this article is about: when you say "it's done" or "it got stronger
 | 4: the scorer is wrong | Calibrate before the run: the reference solution must pass, "base plus one comment line" must fail | third-round freeze record (32/32 passed) |
 | 5: capabilities switched off | Prove the feature actually fires first, then measure: show row by row "it ran, it produced output, downstream used it"; anything that fails stays out of the measurement | measurement calibration audit, 2026-10-19 |
 | 6: different starting points | Fork from the same start: control arm and treatment arm start from the same patch | council consensus, 2026-10-23 |
-| 7: denominator too small | Write the bar in advance: denominator < 20 is judged "insufficient information," report direction only; no adding problems after the freeze | second- and third-round pre-registrations |
+| 7: denominator too small | Write the bar and the order of the verdicts in advance: test "insufficient information" first (denominator < 20), report direction only; only otherwise choose supported or not supported; no adding problems after the freeze | second- and third-round pre-registrations |
 | 8: small effects stacking | Set a bar per mechanism in advance (for example +10 pp), judge each on its own, never sum | R6/R7 and memory re-test |
 | Changing the rules afterwards | Frozen fields; an addendum may only be filed before any formal scoring is seen | third-round pre-registration |
 | Measuring yourself | Separate who builds, who measures, who approves; independent recomputation before publishing; publish hashes before unblinding, and unblind once | blind-measurement custody procedure; second-round pre-registration |
@@ -51,7 +51,7 @@ Three more details. **Unblinding needs a gate**: publish the hashes of the candi
 - [ ] Scorer calibrated: the reference solution passes, the known-bad solution fails.
 - [ ] Problems unseen: not written by the person tuning the code; exposure and model cutoff reported by stratum.
 - [ ] Control and treatment start from the same point, and only one variable changes at a time.
-- [ ] Denominator bar and "insufficient information" written in advance; no problems added after the freeze.
+- [ ] Denominator bar and the ordered verdict written in advance: first "insufficient information," only then "supported" or "not supported this round"; no problems added after the freeze.
 - [ ] Each mechanism judged against its own bar; small effects are not summed; the baseline is taken apart first.
 - [ ] Scorers cannot see the arm; hashes are published first, then unblind once.
 - [ ] Addenda are filed only before any formal scoring is seen, and who saw what is recorded.

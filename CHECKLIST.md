@@ -9,7 +9,7 @@
 - [ ] **Scorer calibrated**: reference solution passes, known-bad solution fails.
 - [ ] **Problems unseen**: not written by the person tuning the tool; exposure and model cutoff reported by stratum.
 - [ ] **Same start, one variable**: control and treatment start from the same point.
-- [ ] **Denominator bar** and "insufficient information" written in advance; no problems added after the freeze.
+- [ ] **Denominator bar** and the ordered verdict written in advance: first "insufficient information" (denominator or interval width), only then "supported" / "not supported this round"; no problems added after the freeze.
 - [ ] **Per-mechanism bar**: small effects are not summed; the baseline is taken apart first.
 - [ ] **Blind scoring**; publish hashes first; unblind once.
 - [ ] **Addenda only before formal scores are seen**; record who looked at what.
@@ -17,4 +17,4 @@
 - [ ] **Report only what was measured**; write "not supported this round" when it is.
 
 # 一頁檢查清單（中文）
-凍結（雜湊）／零模型提示比對／假模型臂 0 題通過／分數來自模型／兩組資訊對稱／能力真的有跑／評分器校準／題目沒看過／同起點只改一個變因／分母門檻事先寫／每個機制各自對門檻／盲評、先公布雜湊再一次解盲／補遺只在看到評分前／做量批准分開、公開前獨立重算／只寫量到的。
+凍結（雜湊）／零模型提示比對／假模型臂 0 題通過／分數來自模型／兩組資訊對稱／能力真的有跑／評分器校準／題目沒看過／同起點只改一個變因／分母門檻與有順序的判定（先判資訊不足，再判支持／未獲支持）事先寫／每個機制各自對門檻／盲評、先公布雜湊再一次解盲／補遺只在看到評分前／做量批准分開、公開前獨立重算／只寫量到的。

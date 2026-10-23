@@ -26,14 +26,17 @@ Rules of this document: before FROZEN, anyone may edit. After FROZEN, the only a
 ## 4. Metrics and thresholds (written before any run)
 | Metric | Definition | Pass bar | Denominator minimum |
 |---|---|---|---|
-| Primary | | point estimate >= X and one-sided 95% lower bound >= Y | n >= 20 |
+| Primary | | point estimate >= X and one-sided 95% lower bound >= Y (read in section 5, step 2) | n >= 20 |
 - Each mechanism is judged against its own bar. Small effects are never summed across mechanisms.
 - Take the baseline apart first (how much of its score is trivially available, such as paths already written in the prompt).
 
-## 5. Three-way verdict (per model, never pooled)
-- SUPPORTED: primary bar met with denominator >= minimum.
-- NOT SUPPORTED THIS ROUND: denominator >= minimum and the bar is not met.
-- INSUFFICIENT INFORMATION: denominator < minimum or interval crosses the boundary. Report direction only, draw no conclusion, add no problems after the freeze, and do not describe a change of direction as a validated new claim.
+## 5. Verdict: an ordered decision, first match wins (per model, never pooled)
+Run the steps in this order and stop at the first one that applies. Every result gets exactly one verdict.
+1. **INSUFFICIENT INFORMATION** if the denominator is below the minimum in section 6, OR (optional, only if registered here before the freeze) the interval of the primary metric is wider than W = <value>. Report direction only, draw no conclusion, add no problems after the freeze, and do not describe a change of direction as a validated new claim. Stop.
+2. Otherwise (denominator is at least the minimum): **SUPPORTED** if the point estimate is at least X AND the registered interval bound (lower bound for a "higher is better" claim) is at least Y, with X and Y from section 4. Stop.
+3. Otherwise: **NOT SUPPORTED THIS ROUND** (the denominator was sufficient and the bar was not met).
+Worked example, bar X = Y = 0.5, minimum n = 20: 55/100 has point estimate 0.55 but lower bound 0.468 < 0.5. Step 1 does not apply (n = 100 >= 20, no width rule registered), step 2 fails, so the verdict is NOT SUPPORTED THIS ROUND, and only that one. A result of 9/12 is INSUFFICIENT INFORMATION at step 1 whatever its interval is.
+(中文：先判「資訊不足」——分母低於第 6 節下限，或（事先登記才算）區間寬度超過 W；不成立才分「支持」（點估計 >= X 且區間界線 >= Y）與「本期未獲支持」。依序判，第一個成立的就是唯一判定。)
 
 ## 6. Denominator rule
 - Minimum n for every verdict: <20>. Estimate it BEFORE freezing from dry runs; if the estimate is below the minimum, add problems before the freeze, or state now that the verdict will probably be INSUFFICIENT INFORMATION.
