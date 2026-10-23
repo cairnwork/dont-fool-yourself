@@ -1,4 +1,4 @@
-# dont-fool-yourself (working name)
+# dont-fool-yourself
 
 **English** | [中文](#中文)
 
