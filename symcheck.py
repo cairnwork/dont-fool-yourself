@@ -6,12 +6,18 @@ difference that is NOT registered as intended. Exit code 0 = only registered
 differences, 1 = unexpected differences, 2 = usage/input error.
 
 A difference is registered (allowed) when either:
-  * the differing lines sit between marker lines containing
-    ARM-SPECIFIC-START and ARM-SPECIFIC-END (in either file), or
-  * a differing line (or JSON key path) matches an --allow REGEX.
+  * the differing line sits between marker lines containing
+    ARM-SPECIFIC-START and ARM-SPECIFIC-END in the file the line lives in.
+    A replaced block must therefore be marked in BOTH files; a block that
+    exists in only one file needs the marker only there. An unpaired,
+    nested or stray marker is an error (exit 2), never a silent allow-all.
+  * a differing line matches an --allow REGEX (an invalid regex is exit 2).
 
 JSON files (*.json) are flattened to "path.to.key = value" lines first, so
-key order and whitespace do not matter. Python 3.10+, standard library only.
+key order and whitespace do not matter. JSON cannot carry markers: use
+--allow for them. In directory mode, hidden files and directories (.git,
+.DS_Store) are ignored and files that are not UTF-8 are skipped and listed.
+Python 3.10+, standard library only.
 """
 import argparse
 import difflib
@@ -46,11 +52,17 @@ def _marked(lines):
     inside, out = False, set()
     for i, ln in enumerate(lines):
         if START in ln:
+            if inside:
+                raise ValueError(f"nested {START} at line {i + 1}")
             inside = True
+        elif END in ln and not inside:
+            raise ValueError(f"{END} without {START} at line {i + 1}")
         if inside:
             out.add(i)
-        if END in ln:
+        if END in ln and inside:
             inside = False
+    if inside:
+        raise ValueError(f"{START} without {END}")
     return out
 
 
@@ -81,8 +93,15 @@ def _pairs(a, b):
         raise ValueError("both inputs must be files or both directories")
     if not pa.is_dir():
         return [(str(pa), pa, pb)], []
-    fa = {p.relative_to(pa).as_posix(): p for p in pa.rglob("*") if p.is_file()}
-    fb = {p.relative_to(pb).as_posix(): p for p in pb.rglob("*") if p.is_file()}
+    def files(root):
+        out = {}
+        for p in root.rglob("*"):
+            rel = p.relative_to(root)
+            if p.is_file() and not any(part.startswith(".") for part in rel.parts):
+                out[rel.as_posix()] = p
+        return out
+
+    fa, fb = files(pa), files(pb)
     pairs = [(k, fa[k], fb[k]) for k in sorted(fa.keys() & fb.keys())]
     missing = [f"{k} (only in A)" for k in sorted(fa.keys() - fb.keys())]
     missing += [f"{k} (only in B)" for k in sorted(fb.keys() - fa.keys())]
@@ -97,17 +116,27 @@ def main(argv=None):
                     help="registered difference: a differing line matching REGEX is allowed (repeatable)")
     args = ap.parse_args(argv)
     try:
+        for p in args.allow:
+            re.compile(p)
         pairs, missing = _pairs(args.a, args.b)
         total = 0
+        is_dir = Path(args.a).is_dir()
         for name, pa, pb in pairs:
-            bad = compare(load_lines(pa), load_lines(pb), args.allow)
+            try:
+                la, lb = load_lines(pa), load_lines(pb)
+            except UnicodeDecodeError:
+                if not is_dir:
+                    raise
+                print(f"SKIPPED {name}: not UTF-8")
+                continue
+            bad = compare(la, lb, args.allow)
             for kind, la, lb in bad:
                 print(f"UNEXPECTED {name}: {kind}: {la if la is not None else lb}")
             total += len(bad)
         for m in missing:
             print(f"UNEXPECTED file: {m}")
             total += 1
-    except (OSError, ValueError, UnicodeDecodeError) as e:
+    except (OSError, ValueError, UnicodeDecodeError, re.error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     print(f"symcheck: {total} unexpected difference(s) in {len(pairs)} file pair(s)")

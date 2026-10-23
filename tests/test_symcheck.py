@@ -48,6 +48,39 @@ class T(unittest.TestCase):
                 if extra: Path(d, arm, extra).write_text("x")
             self.assertEqual(symcheck.main([f"{d}/A", f"{d}/B"]), 1)
 
+    def test_start_without_end_is_error(self):
+        a = "t\n# ARM-SPECIFIC-START\nhint\nsecret hint: answer is 42\n"
+        b = "t\nhint\n"
+        self.assertEqual(self.run_pair(a, b), 2)
+
+    def test_end_without_start_and_nested(self):
+        self.assertEqual(self.run_pair("t\n# ARM-SPECIFIC-END\n", "t\n"), 2)
+        self.assertEqual(self.run_pair("# ARM-SPECIFIC-START\n# ARM-SPECIFIC-START\n# ARM-SPECIFIC-END\n", "x\n"), 2)
+
+    def test_hidden_line_after_closed_block_caught(self):
+        a = "t\n# ARM-SPECIFIC-START\nh\n# ARM-SPECIFIC-END\nsecret hint: 42\n"
+        self.assertEqual(self.run_pair(a, "t\n"), 1)
+
+    def test_replaced_block_needs_both_marks(self):
+        a = "# ARM-SPECIFIC-START\nhint A\n# ARM-SPECIFIC-END\n"
+        b = "hint B\n"
+        self.assertEqual(self.run_pair(a, b), 1)
+        b2 = "# ARM-SPECIFIC-START\nhint B\n# ARM-SPECIFIC-END\n"
+        self.assertEqual(self.run_pair(a, b2), 0)
+
+    def test_bad_regex(self):
+        self.assertEqual(self.run_pair("a\n", "a\n", allow=["("]), 2)
+
+    def test_dir_ignores_hidden_and_skips_binary(self):
+        with tempfile.TemporaryDirectory() as d:
+            for arm in ("A", "B"):
+                Path(d, arm, ".git").mkdir(parents=True)
+                Path(d, arm, "p.txt").write_text("same")
+                Path(d, arm, ".DS_Store").write_bytes(bytes([arm == "A"]))
+                Path(d, arm, ".git", "x").write_text(arm)
+                Path(d, arm, "img.bin").write_bytes(b"\xff\xfe" + arm.encode())
+            self.assertEqual(symcheck.main([f"{d}/A", f"{d}/B"]), 0)
+
     def test_missing_input(self):
         self.assertEqual(symcheck.main(["/nonexistent/a", "/nonexistent/b"]), 2)
 
