@@ -1,10 +1,8 @@
 # How to Run an A/B on an Agent Tool Without Fooling Yourself
 
-We build engineering tools for AI agents. Over eight months we measured many times that "this tool makes the model stronger." On 2026-10-19 we went back and audited the calibration, and the verdict was ugly: from 2/20 to that day, every number that claimed an improvement did not hold up after calibration, while the claims of "no improvement" were mostly accurate (measurement calibration audit, 2026-10-19). The records were real runs. What was wrong was the way we measured, not fabrication (same file).
+One internal case: we swapped in a NOOP fake model that does nothing, ran the same problem set, and it still scored 12/12 (route-by-route comparison, 2026-10-19). That means part of that set's score was not measured from the model at all, and the scorer was not calibrated. We build engineering tools for AI agents. Over eight months we measured many times that "this tool makes the model stronger." On 2026-10-19 we went back and audited the calibration, and the verdict was ugly: from 2/20 to that day, every number that claimed an improvement did not hold up after calibration, while the claims of "no improvement" were mostly accurate (measurement calibration audit, 2026-10-19). The records were real runs. What was wrong was the way we measured, not fabrication (same file).
 
-Another number from the same period is even less comfortable. A 2026-10-17 audit of 2,018 merged PRs across 11 repos confirmed a lower bound of 133/2,018 = 6.6% (interval 5.6-7.8) for PRs that claimed to be done but were not, with an estimate of 7-10%. How strict the governance rules were showed no visible relationship to that rate. What caught these PRs was real use (54), independent review (27), and almost nothing from automated gates (false-completion audit, 2026-10-17).
-
-Both are the same problem: you say "it's done" or "it got stronger," and why should you believe yourself? This article covers how we got fooled and the checks we added afterwards.
+This is the problem this article is about: you say "it's done" or "it got stronger," and why should you believe yourself? This article covers how we got fooled and the checks we added afterwards.
 
 ## 1. How our own numbers fooled us
 
@@ -61,6 +59,8 @@ Three more details. **Unblinding needs a gate**: publish the hashes of the candi
 - [ ] The report states only what was measured; what was not measured is written as "not supported this round."
 
 ## 4. How we do it now
+
+The same problem shows up with "done." A 2026-10-17 audit of 2,018 merged PRs across 11 repos confirmed a lower bound of 133/2,018 = 6.6% (interval 5.6-7.8) for PRs that claimed to be done but were not, with an estimate of 7-10%. How strict the governance rules were showed no visible relationship to that rate. What caught these PRs was real use (54), independent review (27), and almost nothing from automated gates (false-completion audit, 2026-10-17).
 
 These checks are now how Cairnwork is measured. Cairnwork is the delivery-verification layer for AI coding agents that we turned out of Nexus. Its core value is not raising the success rate but "completion with evidence" (Cairnwork README, "Positioning" section). Its A/B follows the rules above, and the third-round pre-registration looks like this: the same problem and the same model are run once, the resulting patch is evaluated under several policies at once, and every patch is fully scored whether or not it is delivered, so false blocks can be measured; the tests are written by three authors who cannot see each other's work; the freeze record contains hashes, seeds and model versions; and the expected number of true failures for Gemini is below 20, so we wrote in advance that we would report direction only and draw no conclusion (third-round pre-registration, 2026-10-22).
 

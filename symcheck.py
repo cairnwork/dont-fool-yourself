@@ -2,8 +2,17 @@
 """symcheck: zero-model symmetry check for two arms of an A/B.
 
 Compare two prompt/config files (or two directories of them) and list every
-difference that is NOT registered as intended. Exit code 0 = only registered
-differences, 1 = unexpected differences, 2 = usage/input error.
+difference that is NOT registered as intended.
+
+Exit codes:
+  0  every compared file pair matched, apart from registered differences
+  1  unexpected differences (listed)
+  2  usage or input error (bad regex, unpaired marker, missing path ...)
+  3  INCOMPLETE: something could not be compared (a skipped or undecodable
+     file, an unparsable or ambiguous JSON file, or zero file pairs). Listed.
+     Never treat 3 as success.
+A 0 means "no unexpected difference within the checked scope", NOT "the arms
+are proven symmetric": anything outside the compared files is not looked at.
 
 A difference is registered (allowed) when either:
   * the differing line sits between marker lines containing
@@ -13,14 +22,21 @@ A difference is registered (allowed) when either:
     nested or stray marker is an error (exit 2), never a silent allow-all.
   * a differing line matches an --allow REGEX (an invalid regex is exit 2).
 
-JSON files (*.json) are flattened to "path.to.key = value" lines first, so
-key order and whitespace do not matter. JSON cannot carry markers: use
---allow for them. In directory mode, hidden files and directories (.git,
-.DS_Store) are ignored and files that are not UTF-8 are skipped and listed.
-Python 3.10+, standard library only.
+Directory mode compares files with the same relative path. Only ".git"
+directories and names given with --ignore (fnmatch against any path part or
+the relative path, repeatable) are skipped by default; every other dotfile
+and directory (for example .claude/) is compared. A file present on one side
+only is an unexpected difference.
+
+JSON files (*.json) are flattened to JSON-pointer lines ("/a/b = 1"), with a
+line for every object and array ("/a : object", "/a : array") so empty
+containers and object-versus-array differences are kept. Duplicate keys make
+the file ambiguous and are reported as INCOMPLETE. JSON cannot carry
+markers: use --allow. Python 3.10+, standard library only.
 """
 import argparse
 import difflib
+import fnmatch
 import json
 import re
 import sys
@@ -29,21 +45,45 @@ from pathlib import Path
 START, END = "ARM-SPECIFIC-START", "ARM-SPECIFIC-END"
 
 
-def _flatten(obj, prefix=""):
+class Incomplete(Exception):
+    """A file could not be compared safely."""
+
+
+def _esc(k):
+    return str(k).replace("~", "~0").replace("/", "~1")
+
+
+def _flatten(obj, ptr=""):
     if isinstance(obj, dict):
+        yield f"{ptr} : object"
         for k in sorted(obj):
-            yield from _flatten(obj[k], f"{prefix}.{k}" if prefix else str(k))
+            yield from _flatten(obj[k], f"{ptr}/{_esc(k)}")
     elif isinstance(obj, list):
+        yield f"{ptr} : array"
         for i, v in enumerate(obj):
-            yield from _flatten(v, f"{prefix}[{i}]")
+            yield from _flatten(v, f"{ptr}/{i}")
     else:
-        yield f"{prefix} = {json.dumps(obj, ensure_ascii=False)}"
+        yield f"{ptr} = {json.dumps(obj, ensure_ascii=False)}"
+
+
+def _no_dup_keys(pairs):
+    keys = [k for k, _ in pairs]
+    dup = {k for k in keys if keys.count(k) > 1}
+    if dup:
+        raise Incomplete(f"duplicate JSON key(s) {sorted(dup)}: ambiguous")
+    return dict(pairs)
 
 
 def load_lines(path):
-    text = Path(path).read_text(encoding="utf-8")
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise Incomplete("not UTF-8, not compared")
     if str(path).endswith(".json"):
-        return list(_flatten(json.loads(text)))
+        try:
+            return list(_flatten(json.loads(text, object_pairs_hook=_no_dup_keys)))
+        except json.JSONDecodeError as e:
+            raise Incomplete(f"invalid JSON ({e.msg}), not compared")
     return text.splitlines()
 
 
@@ -87,18 +127,29 @@ def compare(a_lines, b_lines, allow=()):
     return bad
 
 
-def _pairs(a, b):
+def _skipped(rel, ignore):
+    parts = rel.split("/")
+    if ".git" in parts:
+        return True
+    return any(fnmatch.fnmatch(rel, g) or any(fnmatch.fnmatch(p, g) for p in parts)
+               for g in ignore)
+
+
+def _pairs(a, b, ignore=()):
     pa, pb = Path(a), Path(b)
+    if not pa.exists() or not pb.exists():
+        raise ValueError("input path does not exist")
     if pa.is_dir() != pb.is_dir():
         raise ValueError("both inputs must be files or both directories")
     if not pa.is_dir():
         return [(str(pa), pa, pb)], []
+
     def files(root):
         out = {}
         for p in root.rglob("*"):
-            rel = p.relative_to(root)
-            if p.is_file() and not any(part.startswith(".") for part in rel.parts):
-                out[rel.as_posix()] = p
+            rel = p.relative_to(root).as_posix()
+            if p.is_file() and not _skipped(rel, ignore):
+                out[rel] = p
         return out
 
     fa, fb = files(pa), files(pb)
@@ -114,33 +165,41 @@ def main(argv=None):
     ap.add_argument("b")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
                     help="registered difference: a differing line matching REGEX is allowed (repeatable)")
+    ap.add_argument("--ignore", action="append", default=[], metavar="GLOB",
+                    help="skip paths matching GLOB in directory mode (repeatable); only .git is skipped by default")
     args = ap.parse_args(argv)
+    incomplete = []
     try:
         for p in args.allow:
             re.compile(p)
-        pairs, missing = _pairs(args.a, args.b)
-        total = 0
-        is_dir = Path(args.a).is_dir()
+        pairs, missing = _pairs(args.a, args.b, args.ignore)
+        total = compared = 0
         for name, pa, pb in pairs:
             try:
                 la, lb = load_lines(pa), load_lines(pb)
-            except UnicodeDecodeError:
-                if not is_dir:
-                    raise
-                print(f"SKIPPED {name}: not UTF-8")
+            except Incomplete as e:
+                incomplete.append(f"{name}: {e}")
                 continue
+            compared += 1
             bad = compare(la, lb, args.allow)
-            for kind, la, lb in bad:
-                print(f"UNEXPECTED {name}: {kind}: {la if la is not None else lb}")
+            for kind, x, y in bad:
+                print(f"UNEXPECTED {name}: {kind}: {x if x is not None else y}")
             total += len(bad)
         for m in missing:
             print(f"UNEXPECTED file: {m}")
             total += 1
-    except (OSError, ValueError, UnicodeDecodeError, re.error) as e:
+    except (OSError, ValueError, re.error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    print(f"symcheck: {total} unexpected difference(s) in {len(pairs)} file pair(s)")
-    return 1 if total else 0
+    if compared == 0 and not incomplete:
+        incomplete.append("no file pairs were compared")
+    for i in incomplete:
+        print(f"INCOMPLETE {i}")
+    print(f"symcheck: {total} unexpected difference(s), {compared} file pair(s) compared, "
+          f"{len(incomplete)} incomplete")
+    if total:
+        return 1
+    return 3 if incomplete else 0
 
 
 if __name__ == "__main__":
